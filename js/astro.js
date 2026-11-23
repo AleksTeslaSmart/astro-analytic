@@ -127,17 +127,32 @@ function meanNode(t) {
   const T = julianCenturies(t);
   return norm(125.0445479 - 1934.1362891 * T + 0.0020754 * T * T + T * T * T / 467441 - T ** 4 / 60616000);
 }
+// Средняя Лилит (апогей средней лунной орбиты), спроецированная с орбиты (наклон 5.145°)
+// на эклиптику — так считают ZET и Swiss Ephemeris (без проекции расхождение до 7′).
+const LUNAR_INCL = 5.145396 * D2R;
 function meanLilith(t) {
   const T = julianCenturies(t);
-  return norm(83.3532465 + 4069.0137287 * T - 0.01032 * T * T - T ** 3 / 80053 + T ** 4 / 18999000 + 180);
+  const apogee = norm(83.3532465 + 4069.0137287 * T - 0.01032 * T * T - T ** 3 / 80053 + T ** 4 / 18999000 + 180);
+  const node = meanNode(t), u = (apogee - node) * D2R;
+  return norm(node + Math.atan2(Math.sin(u) * Math.cos(LUNAR_INCL), Math.cos(u)) * R2D);
 }
-// Селена (Белая Луна) авестийской школы: равномерный цикл ровно 7 тропических лет.
-// Привязка: вход в 0° Весов 12.10.2026 10:04 UTC (выход в Скорпион 13.05.2027 — сходится).
-const SELENA_EPOCH_MS = Date.UTC(2026, 9, 12, 10, 4), SELENA_PERIOD_DAYS = 7 * 365.2422;
-function selena(t) { return norm(180 + 360 * ((t.date.getTime() - SELENA_EPOCH_MS) / 86400000) / SELENA_PERIOD_DAYS); }
+// Истинный (оскулирующий) узел: из мгновенной плоскости орбиты Луны
+// (вектор углового момента r × v в истинной эклиптике даты). Совпадает с ZET в пределах нескольких секунд.
+function trueNode(t) {
+  const vec = (tt) => { const m = A.EclipticGeoMoon(tt); const la = m.lat * D2R, lo = m.lon * D2R; return [m.dist * Math.cos(la) * Math.cos(lo), m.dist * Math.cos(la) * Math.sin(lo), m.dist * Math.sin(la)]; };
+  const h = 1 / 24, r = vec(t), r1 = vec(t.AddDays(-h)), r2 = vec(t.AddDays(h));
+  const v = r2.map((x, i) => (x - r1[i]) / (2 * h));
+  const H = [r[1] * v[2] - r[2] * v[1], r[2] * v[0] - r[0] * v[2], r[0] * v[1] - r[1] * v[0]];
+  return norm(Math.atan2(H[0], -H[1]) * R2D);
+}
+// Селена (Белая Луна) авестийской школы — параметры из ZET 9 (конфигурация Avestian):
+// 242.5° на 1.01.2000 0:00 UT (JD 2451544.5), равномерное движение 0.1408272°/сут (период ≈ 7 лет).
+// Проверено по ZET на трёх датах (1990, 2000, 2026) — совпадение до нескольких секунд.
+const SELENA_EPOCH_MS = Date.UTC(2000, 0, 1, 0, 0), SELENA_DEG_PER_DAY = 0.1408272;
+function selena(t) { return norm(242.5 + SELENA_DEG_PER_DAY * (t.date.getTime() - SELENA_EPOCH_MS) / 86400000); }
 export function lonOf(id, t) {
-  if (id === 'node') return meanNode(t);
-  if (id === 'ketu') return norm(meanNode(t) + 180);
+  if (id === 'node') return trueNode(t);
+  if (id === 'ketu') return norm(trueNode(t) + 180);
   if (id === 'lilith') return meanLilith(t);
   if (id === 'selena') return selena(t);
   return norm(bodyLon(P[id].body, t));
