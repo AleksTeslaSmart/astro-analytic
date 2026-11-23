@@ -101,3 +101,5 @@ select { width: auto; max-width: 100%; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chips button { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
 .loading { color: var(--muted); padding: 20px; text-align: center; }
+.wheel .outer.transit .pglyph, .wheel .outer.transit .pdeg, .wheel .legend.transit { fill: #e0261b; font-weight: 700; }
+.wheel .outer.transit .pglyph { font-size: 27px; }

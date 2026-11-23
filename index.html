@@ -32,13 +32,14 @@
       <label>Дата рождения<input name="date" type="date" required></label>
       <label>Время (местное)<input name="time" type="time" required value="12:00"></label>
       <label class="wide">Место рождения
-        <span class="row nowrap"><input name="place" placeholder="Город" ><button class="btn" type="button" id="findPlace">Найти</button></span>
+        <span class="row nowrap"><input name="place" placeholder="Начните вводить город — например, Москва" ><button class="btn" type="button" id="findPlace">Найти</button></span>
         <span id="placeResults" class="results"></span>
       </label>
-      <label>Широта<input name="lat" type="number" step="0.0001" required placeholder="55.7558"></label>
-      <label>Долгота<input name="lon" type="number" step="0.0001" required placeholder="37.6173"></label>
-      <label>Часовой пояс<input name="tz" placeholder="Europe/Moscow"></label>
-      <label>Смещение UTC, ч <small>(необязательно)</small><input name="offset" type="number" step="0.25" placeholder="авто"></label>
+      <label>Широта <small>(заполнится сама)</small><input name="lat" type="number" step="0.0001" placeholder="55.7558"></label>
+      <label>Долгота <small>(заполнится сама)</small><input name="lon" type="number" step="0.0001" placeholder="37.6173"></label>
+      <label>Часовой пояс <small>(заполнится сам)</small><input name="tz" placeholder="Europe/Moscow"></label>
+      <label>Ручная поправка UTC, ч <small>(только если авто ошибается)</small><input name="offset" type="number" step="0.25" placeholder="не нужна"></label>
+      <div class="wide note" id="offsetInfo"></div>
       <div class="wide row">
         <button class="btn primary" type="submit">Рассчитать и сохранить</button>
         <button class="btn ghost danger" type="button" id="deletePerson">Удалить</button>
@@ -54,6 +55,7 @@
     <button data-tab="transit">Транзиты</button>
     <button data-tab="syn">Синастрия</button>
     <button data-tab="complex">Комплекс</button>
+    <button data-tab="horary">Хорар</button>
     <button data-tab="chat">Чат с ИИ</button>
   </nav>
 
@@ -63,7 +65,7 @@
 </main>
 
 <footer class="foot muted">
-  Расчёты: astronomy-engine (точность ~1′), тропический Зодиак, Плацидус (за полярным кругом — Порфирий). Узел и Лилит — средние.
+  Расчёты: astronomy-engine (точность ~1′), тропический Зодиак, Плацидус (за полярным кругом — Порфирий). Узлы и Лилит — средние; Селена — авестийская (цикл 7 лет). Поиск городов: Open-Meteo / OpenStreetMap.
   Трактовки составлены по мотивам книг П. Глобы, С. Вронского, Б. Щитова и других авторов.
 </footer>
 <script type="module" src="js/app.js"></script>

@@ -1,5 +1,5 @@
 // Круг карты в SVG: знаки, дома, планеты, аспекты; опционально внешний круг (би-карта).
-import { SIGNS, P, norm, MAIN } from './astro.js';
+import { SIGNS, P, norm, MAIN, FICT } from './astro.js';
 
 const EL_COLOR = { fire: 'var(--fire)', earth: 'var(--earth)', air: 'var(--air)', water: 'var(--water)' };
 const ASP_COLOR = { soft: 'var(--soft)', hard: 'var(--hard)', conj: 'var(--conj)' };
@@ -20,7 +20,7 @@ function spread(items, minGap) {
   return arr;
 }
 
-export function chartSVG(chart, { outer = null, aspects = [], outerLabel = '' } = {}) {
+export function chartSVG(chart, { outer = null, aspects = [], outerLabel = '', outerKind = '' } = {}) {
   const size = outer ? 700 : 620, c = size / 2;
   const R = outer ? { sOut: 300, sIn: 268, pl: 236, hIn: 150, outPl: 325 } : { sOut: 300, sIn: 266, pl: 232, hIn: 150 };
   const asc = chart.houses.cusps[1];
@@ -61,20 +61,20 @@ export function chartSVG(chart, { outer = null, aspects = [], outerLabel = '' } 
   }
   // планеты
   const drawSet = (pos, r, cls) => {
-    const ids = [...MAIN, 'node', 'lilith'].filter((id) => pos[id]);
+    const ids = [...MAIN, ...FICT].filter((id) => pos[id]);
     const items = spread(ids.map((id) => ({ id, lon: pos[id].lon })), 8.5);
     for (const it of items) {
-      const [px, py] = xy(it.d, r), [lx1, ly1] = xy(it.lon, cls === 'outer' ? R.sOut : R.sIn), [lx2, ly2] = xy(it.d, cls === 'outer' ? r - 12 : r + 12);
+      const [px, py] = xy(it.d, r), [lx1, ly1] = xy(it.lon, cls.startsWith('outer') ? R.sOut : R.sIn), [lx2, ly2] = xy(it.d, cls.startsWith('outer') ? r - 12 : r + 12);
       const deg = Math.floor(norm(it.lon) % 30);
       s += `<line x1="${lx1}" y1="${ly1}" x2="${lx2}" y2="${ly2}" class="pline"/>`;
       s += `<g class="planet ${cls}"><title>${P[it.id].name} ${deg}° ${SIGNS[Math.floor(norm(it.lon) / 30)].gen}${pos[it.id].retro ? ' R' : ''}</title><text x="${px}" y="${py}" class="pglyph">${P[it.id].glyph}${VS}</text>`;
-      const [dx, dy] = xy(it.d, cls === 'outer' ? r + 19 : r - 20);
+      const [dx, dy] = xy(it.d, cls.startsWith('outer') ? r + 19 : r - 20);
       s += `<text x="${dx}" y="${dy}" class="pdeg">${deg}${pos[it.id].retro ? 'ᴿ' : ''}</text></g>`;
     }
   };
   drawSet(chart.pos, R.pl, 'inner');
-  if (outer) drawSet(outer, R.outPl, 'outer');
-  if (outerLabel) s += `<text x="10" y="20" class="legend">Внешний круг: ${outerLabel}</text>`;
+  if (outer) drawSet(outer, R.outPl, 'outer' + (outerKind ? ' ' + outerKind : ''));
+  if (outerLabel) s += `<text x="10" y="20" class="legend${outerKind ? ' ' + outerKind : ''}">Внешний круг: ${outerLabel}</text>`;
   s += '</svg>';
   return s;
 }

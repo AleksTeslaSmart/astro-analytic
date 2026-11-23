@@ -3,6 +3,8 @@ import { fullNatalAnalysis } from './analysis.js';
 import * as R from './report.js';
 import { chartSVG } from './chart-svg.js';
 import { renderChat } from './ai.js';
+import { renderHorary } from './horary.js';
+import { attachPlaceSearch, searchPlaces, offsetFor, fmtOffset } from './geo.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
@@ -41,11 +43,42 @@ function fillSelect() {
 }
 function fillForm(p) {
   for (const k of ['name', 'date', 'time', 'place', 'lat', 'lon', 'tz', 'offset']) form.elements[k].value = p?.[k] ?? (k === 'time' ? '12:00' : '');
+  updateOffsetInfo();
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-form.addEventListener('submit', (e) => {
+// Автоматическое смещение UTC: показываем для выбранной даты, времени и пояса
+function updateOffsetInfo() {
+  const tz = form.elements.tz.value || (form.elements.lat.value && form.elements.lon.value ? safeTz(form.elements.lat.value, form.elements.lon.value) : '');
+  const box = $('#offsetInfo');
+  if (form.elements.offset.value !== '') { box.textContent = `Ручная поправка: UTC${+form.elements.offset.value >= 0 ? '+' : ''}${form.elements.offset.value} (автоопределение отключено)`; return; }
+  const off = offsetFor(tz, form.elements.date.value, form.elements.time.value);
+  if (off === null || !tz) { box.textContent = 'Пояс и смещение UTC определятся автоматически после выбора города.'; return; }
+  const winter = offsetFor(tz, form.elements.date.value.slice(0, 4) + '-01-15', '12:00');
+  box.textContent = `Определено автоматически: ${tz}, ${fmtOffset(off)}${winter !== null && winter !== off ? ' (летнее время)' : ''}`;
+}
+['date', 'time', 'tz', 'offset'].forEach((k) => form.elements[k].addEventListener('input', updateOffsetInfo));
+// город изменён вручную — старые координаты больше не годятся (при сохранении найдём заново)
+form.elements.place.addEventListener('input', () => { form.elements.lat.value = ''; form.elements.lon.value = ''; form.elements.tz.value = ''; updateOffsetInfo(); });
+attachPlaceSearch(form.elements.place, $('#placeResults'), (it) => {
+  form.elements.lat.value = it.lat.toFixed(4); form.elements.lon.value = it.lon.toFixed(4);
+  form.elements.place.value = it.label.split(',').slice(0, 2).join(',');
+  form.elements.tz.value = it.tz; form.elements.offset.value = '';
+  updateOffsetInfo();
+}, $('#findPlace'));
+
+form.addEventListener('submit', async (e) => {
   e.preventDefault();
+  // координаты не введены — находим город автоматически
+  if ((!form.elements.lat.value || !form.elements.lon.value) && form.elements.place.value.trim()) {
+    $('#formMsg').textContent = 'Ищу координаты города…';
+    const [it] = await searchPlaces(form.elements.place.value.trim());
+    if (!it) { $('#formMsg').textContent = 'Город не найден — уточните название или введите координаты.'; return; }
+    form.elements.lat.value = it.lat.toFixed(4); form.elements.lon.value = it.lon.toFixed(4); form.elements.tz.value = it.tz;
+    form.elements.place.value = it.label.split(',').slice(0, 2).join(',');
+    updateOffsetInfo();
+  }
+  if (!form.elements.lat.value || !form.elements.lon.value) { $('#formMsg').textContent = 'Укажите город (или координаты).'; return; }
   const f = Object.fromEntries(new FormData(form).entries());
   if (!f.tz) f.tz = safeTz(f.lat, f.lon);
   form.elements.tz.value = f.tz;
@@ -70,29 +103,8 @@ $('#deletePerson').addEventListener('click', () => {
   store.set('astro.persons', state.persons); store.set('astro.current', 0);
   fillSelect(); fillForm(state.persons[0]); render();
 });
-form.elements.lat.addEventListener('change', () => { if (form.elements.lat.value && form.elements.lon.value) form.elements.tz.value = safeTz(form.elements.lat.value, form.elements.lon.value); });
-form.elements.lon.addEventListener('change', () => { if (form.elements.lat.value && form.elements.lon.value) form.elements.tz.value = safeTz(form.elements.lat.value, form.elements.lon.value); });
-
-// Поиск города (OpenStreetMap Nominatim)
-$('#findPlace').addEventListener('click', async () => {
-  const q = form.elements.place.value.trim(); if (!q) return;
-  const box = $('#placeResults'); box.textContent = 'Поиск…';
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=6&accept-language=ru&q=${encodeURIComponent(q)}`);
-    const list = await r.json();
-    box.innerHTML = '';
-    if (!list.length) { box.textContent = 'Не найдено — введите координаты вручную.'; return; }
-    for (const it of list) {
-      const b = document.createElement('button'); b.type = 'button';
-      b.textContent = `${it.display_name} (${(+it.lat).toFixed(2)}, ${(+it.lon).toFixed(2)})`;
-      b.onclick = () => {
-        form.elements.lat.value = (+it.lat).toFixed(4); form.elements.lon.value = (+it.lon).toFixed(4);
-        form.elements.place.value = it.display_name.split(',').slice(0, 2).join(',');
-        form.elements.tz.value = safeTz(it.lat, it.lon); box.innerHTML = '';
-      };
-      box.appendChild(b);
-    }
-  } catch { box.textContent = 'Сервис поиска недоступен — введите координаты вручную.'; }
+for (const k of ['lat', 'lon']) form.elements[k].addEventListener('change', () => {
+  if (form.elements.lat.value && form.elements.lon.value) { form.elements.tz.value = safeTz(form.elements.lat.value, form.elements.lon.value); updateOffsetInfo(); }
 });
 
 // ---------- Вкладки ----------
@@ -163,7 +175,7 @@ const RENDER = {
     const controls = `<label>С даты<input type="date" id="trFrom" value="${state.trFrom}"></label>
       <label>Период<select id="trMonths">${[1, 3, 6, 12, 24, 36].map((m) => `<option value="${m}" ${m === state.trMonths ? 'selected' : ''}>${m} мес.</option>`).join('')}</select></label>
       <button class="btn" id="trGo">Рассчитать</button>`;
-    view.innerHTML = layout(chartSVG(ch, { outer: rep.snap.pos, outerLabel: 'транзиты на ' + from.toLocaleDateString('ru-RU'), aspects: aspLines(rep.snap.aspects.filter((a) => a.a !== 'moon'), rep.snap.pos, ch.pos) }), rep.html, controls);
+    view.innerHTML = layout(chartSVG(ch, { outer: rep.snap.pos, outerLabel: 'транзиты на ' + from.toLocaleDateString('ru-RU'), outerKind: 'transit', aspects: aspLines(rep.snap.aspects.filter((a) => a.a !== 'moon'), rep.snap.pos, ch.pos) }), rep.html, controls);
     $('#trGo').onclick = () => { state.trFrom = $('#trFrom').value; state.trMonths = +$('#trMonths').value; render(); };
   },
   syn() {
@@ -192,9 +204,10 @@ const RENDER = {
     const cx = R.complexReport(ch, an, sr, srRep, pr, prRep, trRep);
     state.cache.complexText = [cx.text, srRep.text, prRep.text, trRep.text].join('\n');
     const controls = `<label>Период: 12 месяцев с даты<input type="date" id="cxFrom" value="${state.trFrom}"></label><button class="btn" id="cxGo">Анализировать</button><span class="muted">Соляр ${sr.year} · прогрессии · транзиты</span>`;
-    view.innerHTML = layout(chartSVG(ch, { outer: trRep.snap.pos, outerLabel: 'транзиты' }), cx.html + `<details class="sec"><summary>Соляр ${sr.year}</summary><div class="sec-body">${srRep.html}</div></details><details class="sec"><summary>Прогрессии</summary><div class="sec-body">${prRep.html}</div></details><details class="sec"><summary>Транзиты</summary><div class="sec-body">${trRep.html}</div></details>`, controls);
+    view.innerHTML = layout(chartSVG(ch, { outer: trRep.snap.pos, outerLabel: 'транзиты', outerKind: 'transit' }), cx.html + `<details class="sec"><summary>Соляр ${sr.year}</summary><div class="sec-body">${srRep.html}</div></details><details class="sec"><summary>Прогрессии</summary><div class="sec-body">${prRep.html}</div></details><details class="sec"><summary>Транзиты</summary><div class="sec-body">${trRep.html}</div></details>`, controls);
     $('#cxGo').onclick = () => { state.trFrom = $('#cxFrom').value; render(); };
   },
+  horary() { renderHorary(view); },
   chat() {
     renderChat(view, buildAIContext);
   },
@@ -227,7 +240,7 @@ function buildAIContext() {
 
 function render() {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === state.tab));
-  if (!state.persons.length) { view.innerHTML = '<p class="empty">Введите данные рождения и нажмите «Рассчитать и сохранить».</p>'; return; }
+  if (!state.persons.length && state.tab !== 'horary') { view.innerHTML = '<p class="empty">Введите данные рождения и нажмите «Рассчитать и сохранить». Хорарный калькулятор работает без карты рождения.</p>'; return; }
   view.innerHTML = '<p class="loading">Расчёт…</p>';
   setTimeout(() => {
     try { RENDER[state.tab](); } catch (err) { console.error(err); view.innerHTML = `<p class="empty">Ошибка расчёта: ${escapeHtml(err.message)}</p>`; }

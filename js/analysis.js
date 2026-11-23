@@ -1,7 +1,7 @@
 // Аналитика карты по методике авестийской школы (П. Глоба):
 // достоинства, ядро космограммы (Ян/Инь/Дэн), кармический статус,
 // управители домов, конфигурации аспектов, сила планет.
-import { SIGNS, P, MAIN, DIGN, RULERS, houseOf, signOf, angDist, norm, aspectsBetween } from './astro.js';
+import { SIGNS, P, MAIN, FICT, DIGN, RULERS, houseOf, signOf, angDist, norm, aspectsBetween } from './astro.js';
 
 export const EL_NAME = { fire: 'Огонь', earth: 'Земля', air: 'Воздух', water: 'Вода' };
 export const CROSS_NAME = { card: 'кардинальный', fix: 'фиксированный', mut: 'мутабельный (подвижный)' };
@@ -214,11 +214,29 @@ export function themeCounter() {
   };
 }
 
+// Структура по домам («гороскоп» в терминологии Глобы)
+const HOUSE_EL = { 1: 'fire', 5: 'fire', 9: 'fire', 2: 'earth', 6: 'earth', 10: 'earth', 3: 'air', 7: 'air', 11: 'air', 4: 'water', 8: 'water', 12: 'water' };
+const HOUSE_CROSS = (h) => ([1, 4, 7, 10].includes(h) ? 'card' : [2, 5, 8, 11].includes(h) ? 'fix' : 'mut');
+export function houseStructure(chart) {
+  const el = { fire: 0, earth: 0, air: 0, water: 0 }, cr = { card: 0, fix: 0, mut: 0 }, zn = { 1: 0, 2: 0, 3: 0 }, qd = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  for (const id of MAIN) {
+    const h = chart.pos[id].house, w = P[id].w;
+    el[HOUSE_EL[h]] += w; cr[HOUSE_CROSS(h)] += w; zn[Math.ceil(h / 4)] += w; qd[Math.ceil(h / 3)] += w;
+  }
+  return { el, cr, zn, qd, dEl: dominance(el), dCr: dominance(cr), dZn: dominance(zn), dQd: dominance(qd) };
+}
+
+// Планетарная лестница: семь планет септенера по порядку от 0° Овна
+export function planetaryLadder(chart) {
+  const sept = ['sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn'];
+  return sept.map((id) => ({ id, lon: chart.pos[id].lon })).sort((a, b) => a.lon - b.lon).map((x, i) => ({ ...x, step: i + 1 }));
+}
+
 export function fullNatalAnalysis(chart) {
-  const aspects = aspectsBetween(chart.pos, chart.pos, [...MAIN, 'node', 'lilith', 'asc', 'mc'], [...MAIN, 'node', 'lilith', 'asc', 'mc'], { minor: true })
+  const aspects = aspectsBetween(chart.pos, chart.pos, [...MAIN, ...FICT, 'asc', 'mc'], [...MAIN, ...FICT, 'asc', 'mc'], { minor: true })
     .filter((a) => !((a.a === 'asc' && a.b === 'mc') || (a.a === 'mc' && a.b === 'asc')))
     .filter((a) => a.major || (MAIN.includes(a.a) && MAIN.includes(a.b)))
-    .filter((a) => !(['node', 'lilith'].includes(a.a) || ['node', 'lilith'].includes(a.b)) || (a.major && a.diff <= 3));
+    .filter((a) => !(FICT.includes(a.a) || FICT.includes(a.b)) || (a.major && a.diff <= 3));
   const c = core(chart);
   const ks = karmicStatus(chart, c);
   const rulers = houseRulers(chart);
@@ -227,5 +245,5 @@ export function fullNatalAnalysis(chart) {
   const configs = configurations(chart, aspects);
   const shape = chartShape(chart);
   const ranked = Object.entries(strength).sort((a, b) => b[1] - a[1]);
-  return { aspects, core: c, ks, rulers, disp, strength, ranked, configs, shape, lord: ranked[0][0] };
+  return { aspects, core: c, ks, rulers, disp, strength, ranked, configs, shape, lord: ranked[0][0], hs: houseStructure(chart), ladder: planetaryLadder(chart) };
 }

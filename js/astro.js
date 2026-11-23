@@ -37,8 +37,13 @@ export const PLANETS = [
   { id: 'neptune', name: 'Нептун', gen: 'Нептуна', glyph: '♆', body: 'Neptune', w: 1 },
   { id: 'pluto', name: 'Плутон', gen: 'Плутона', glyph: '♇', body: 'Pluto', w: 1 },
   { id: 'node', name: 'Раху (Сев. узел)', gen: 'Раху', glyph: '☊', w: 0 },
+  { id: 'ketu', name: 'Кету (Юж. узел)', gen: 'Кету', glyph: '☋', w: 0 },
   { id: 'lilith', name: 'Лилит (Чёрная Луна)', gen: 'Лилит', glyph: '⚸', w: 0 },
+  { id: 'selena', name: 'Селена (Белая Луна)', gen: 'Селены', glyph: '○', w: 0 },
 ];
+export const FICT = ['node', 'ketu', 'lilith', 'selena'];
+// Экзальтации фиктивных точек по Глобе
+export const FICT_EXALT = { node: { exalt: [2], fall: [8] }, ketu: { exalt: [8], fall: [2] }, lilith: { exalt: [7, 9, 11], fall: [] }, selena: { exalt: [5, 3, 1], fall: [] } };
 export const P = Object.fromEntries(PLANETS.map((p) => [p.id, p]));
 export const MAIN = PLANETS.filter((p) => p.w > 0).map((p) => p.id);
 
@@ -126,9 +131,15 @@ function meanLilith(t) {
   const T = julianCenturies(t);
   return norm(83.3532465 + 4069.0137287 * T - 0.01032 * T * T - T ** 3 / 80053 + T ** 4 / 18999000 + 180);
 }
+// Селена (Белая Луна) авестийской школы: равномерный цикл ровно 7 тропических лет.
+// Привязка: вход в 0° Весов 12.10.2026 10:04 UTC (выход в Скорпион 13.05.2027 — сходится).
+const SELENA_EPOCH_MS = Date.UTC(2026, 9, 12, 10, 4), SELENA_PERIOD_DAYS = 7 * 365.2422;
+function selena(t) { return norm(180 + 360 * ((t.date.getTime() - SELENA_EPOCH_MS) / 86400000) / SELENA_PERIOD_DAYS); }
 export function lonOf(id, t) {
   if (id === 'node') return meanNode(t);
+  if (id === 'ketu') return norm(meanNode(t) + 180);
   if (id === 'lilith') return meanLilith(t);
+  if (id === 'selena') return selena(t);
   return norm(bodyLon(P[id].body, t));
 }
 
@@ -139,7 +150,7 @@ export function planetPositions(date) {
     const lon = lonOf(p.id, t);
     const l1 = lonOf(p.id, t.AddDays(-0.5)), l2 = lonOf(p.id, t.AddDays(0.5));
     let speed = norm(l2 - l1 + 180) - 180;
-    res[p.id] = { id: p.id, lon, speed, retro: speed < 0 && p.id !== 'node' && p.id !== 'lilith', sign: signOf(lon) };
+    res[p.id] = { id: p.id, lon, speed, retro: speed < 0 && !FICT.includes(p.id), sign: signOf(lon) };
   }
   return res;
 }
@@ -219,7 +230,7 @@ export function aspectsBetween(posA, posB, idsA, idsB, opts = {}) {
     for (let j = same ? i + 1 : 0; j < idsB.length; j++) {
       const a = idsA[i], b = idsB[j];
       if (same && a === b) continue;
-      if ((a === 'node' && b === 'lilith') || (a === 'lilith' && b === 'node')) continue;
+      if (FICT.includes(a) && FICT.includes(b)) continue;
       const pa = posA[a], pb = posB[b];
       if (!pa || !pb) continue;
       const lights = ['sun', 'moon'].includes(a) || ['sun', 'moon'].includes(b);

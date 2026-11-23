@@ -1,14 +1,23 @@
 // Генерация отчётов (HTML + текст для ИИ) по всем видам анализа.
-import { SIGNS, P, MAIN, RULERS, fmtDeg, angDist, aspectsBetween, signOf, houseOf, transitEvents, transitHouseIngresses, transitSnapshot } from './astro.js';
+import { SIGNS, P, MAIN, FICT, FICT_EXALT, RULERS, fmtDeg, angDist, aspectsBetween, signOf, houseOf, transitEvents, transitHouseIngresses, transitSnapshot } from './astro.js';
 import { fullNatalAnalysis, dignity, EL_NAME, CROSS_NAME, ZONE_NAME, QUAD_NAME, PRINC_NAME, themeCounter, houseRulers } from './analysis.js';
 import * as N from './texts/natal.js';
 import { aspectText, ASPECT_KIND_TEXT, synPairText, SYN_SPHERES } from './texts/aspects.js';
 import * as F from './texts/forecast.js';
+import * as ST from './texts/structure.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const name = (id) => (P[id] ? P[id].name : id === 'asc' ? 'Асцендент' : id === 'mc' ? 'MC' : id);
 const roman = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 const dstr = (d) => d.toLocaleDateString('ru-RU');
+// достоинство для любой точки: планеты — по таблице Глобы, фиктивные — экзальтация/падение
+function anyDignity(id, sign, day) {
+  if (MAIN.includes(id)) return dignity(id, sign, day);
+  const f = FICT_EXALT[id];
+  if (f?.exalt.includes(sign)) return { key: 'fexalt', label: 'экзальтация', score: 0 };
+  if (f?.fall.includes(sign)) return { key: 'ffall', label: 'падение', score: 0 };
+  return { key: 'none', label: '' };
+}
 
 function section(title, body, open = false) {
   return `<details class="sec"${open ? ' open' : ''}><summary>${title}</summary><div class="sec-body">${body}</div></details>`;
@@ -19,9 +28,9 @@ function item(head, text, cls = '') {
 
 export function positionsTable(chart, extraCol = null) {
   let rows = '';
-  for (const id of [...MAIN, 'node', 'lilith', 'asc', 'mc']) {
+  for (const id of [...MAIN, ...FICT, 'asc', 'mc']) {
     const p = chart.pos[id]; if (!p) continue;
-    const dg = MAIN.includes(id) ? dignity(id, p.sign, chart.day) : { label: '' };
+    const dg = anyDignity(id, p.sign, chart.day);
     rows += `<tr><td>${P[id] ? P[id].glyph + '︎ ' : ''}${name(id)}</td><td>${fmtDeg(p.lon)}${p.retro ? ' <b title="ретроградно">R</b>' : ''}</td><td>${roman[p.house] || ''}</td><td class="muted">${dg.label || ''}</td>${extraCol ? `<td>${extraCol(id, p) ?? ''}</td>` : ''}</tr>`;
   }
   return `<table class="tbl"><thead><tr><th>Точка</th><th>Положение</th><th>Дом</th><th>Достоинство</th>${extraCol ? '<th></th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`;
@@ -68,13 +77,19 @@ export function natalReport(chart, an = fullNatalAnalysis(chart)) {
   const absScore = MAIN.reduce((a, id) => a + an.ks[id].total, 0);
   coreHtml += item(`Кармический статус планет (балл карты: ${absScore > 0 ? '+' : ''}${absScore})`, `<table class="tbl small"><tbody>${ksRows}</tbody></table><p class="muted">Положительный статус — достоинство, опора; отрицательный — комплекс, который нужно прорабатывать. ±7 и более — «королевский» статус. Сумма ${absScore > 0 ? 'положительна: ядро в процессе формирования' : absScore < 0 ? 'отрицательна: ядро расколото, важна работа над слабыми планетами' : 'равна нулю: свобода выбора направления'}.</p>`);
   parts.push(section('Ядро космограммы и кармический статус (по Глобе)', coreHtml));
+  const st = structureSection(chart, an);
+  parts.push(section('Структурный анализ: космограмма и гороскоп', st.html));
+  txt.push(st.text);
+  const ld = ladderSection(chart, an);
+  parts.push(section('Планетарная лестница', ld.html));
+  txt.push(ld.text);
   txt.push(`ЯДРО: стихии ${balance(c.el, EL_NAME)}; кресты ${balance(c.cr, CROSS_NAME)}; ядро ${c.integrity}, начало ${c.corePrinciple ? PRINC_NAME[c.corePrinciple] : 'нет'}. Кармич. статус: ${MAIN.map((id) => `${name(id)} ${an.ks[id].total}`).join(', ')}.`);
 
   // Планеты
   let pl = '';
-  for (const id of [...MAIN, 'node', 'lilith']) {
+  for (const id of [...MAIN, ...FICT]) {
     const p = chart.pos[id];
-    const dg = MAIN.includes(id) ? dignity(id, p.sign, chart.day) : { key: 'none' };
+    const dg = anyDignity(id, p.sign, chart.day);
     let t = `<p class="muted">${N.PLANET_MEANING[id].core}</p>`;
     t += `<p><b>В знаке ${SIGNS[p.sign].gen}:</b> ${N.PLANET_IN_SIGN[id][p.sign]}</p>`;
     t += `<p><b>В ${roman[p.house]} доме:</b> ${N.PLANET_IN_HOUSE[id][p.house]}</p>`;
@@ -84,7 +99,6 @@ export function natalReport(chart, an = fullNatalAnalysis(chart)) {
     if (angDist(p.lon, chart.houses.mc) < 5) t += `<p class="note">${name(id)} ${N.ANGLE_CONJ.mc}</p>`;
     const ruled = an.rulers.filter((r) => r.rulers.some((x) => x.id === id)).map((r) => roman[r.house]);
     if (ruled.length) t += `<p class="muted">Управляет домами: ${ruled.join(', ')}.</p>`;
-    if (id === 'node') t += `<p class="muted">Кету (Южный узел) — в ${SIGNS[signOf(p.lon + 180)].loc}, ${roman[houseOf(p.lon + 180, chart.houses.cusps)]} дом: прошлый опыт и привычки, на которые не стоит опираться чрезмерно.</p>`;
     pl += item(`${P[id].glyph}︎ ${name(id)} — ${fmtDeg(p.lon)}${p.retro ? ' R' : ''}, ${roman[p.house]} дом${dg.label ? ' · ' + dg.label : ''}`, t);
     txt.push(`${name(id)}: ${fmtDeg(p.lon)}${p.retro ? ' R' : ''}, ${p.house} дом${dg.label ? ', ' + dg.label : ''}.`);
   }
@@ -137,6 +151,66 @@ export function natalReport(chart, an = fullNatalAnalysis(chart)) {
   // Возрастные периоды
   parts.push(section('Планетарные возрасты', N.PLANET_AGES.map((a) => item(`${a.from}–${a.to === 120 ? '…' : a.to} лет — ${name(a.id)} (сила ${an.strength[a.id]})`, `${a.text}. ${an.strength[a.id] >= 5 ? 'Планета сильна — период обещает раскрытие возможностей.' : an.strength[a.id] <= 1 ? 'Планета ослаблена — период требует больше усилий.' : 'Средняя сила планеты.'}`)).join('')));
   return { html: parts.join(''), text: txt.join('\n'), analysis: an };
+}
+
+// ---- Структурный анализ: космограмма (по знакам) и гороскоп (по домам) ----
+const LEVELS = [
+  { key: 'el', d: 'dEl', title: 'Стихии', names: EL_NAME, T: ST.EL },
+  { key: 'cr', d: 'dCr', title: 'Кресты', names: CROSS_NAME, T: ST.CR, hNames: { card: 'угловые', fix: 'последующие', mut: 'падающие' } },
+  { key: 'zn', d: 'dZn', title: 'Зоны', names: { 1: '1-я зона', 2: '2-я зона', 3: '3-я зона' }, T: ST.ZN, hNames: { 1: 'дома I–IV', 2: 'дома V–VIII', 3: 'дома IX–XII' } },
+  { key: 'qd', d: 'dQd', title: 'Квадранты', names: { 1: 'I кв.', 2: 'II кв.', 3: 'III кв.', 4: 'IV кв.' }, T: ST.QD, hNames: { 1: 'дома I–III', 2: 'дома IV–VI', 3: 'дома VII–IX', 4: 'дома X–XII' } },
+];
+function structureSection(chart, an) {
+  const c = an.core, h = an.hs;
+  let html = `<p class="muted">${ST.COSMO_VS_HORO}</p>`;
+  const txt = ['СТРУКТУРА (космограмма по знакам / гороскоп по домам):'];
+  let same = 0;
+  for (const L of LEVELS) {
+    const cs = c[L.key], hs = h[L.key];
+    const keys = Object.keys(cs);
+    const hn = L.hNames || L.names;
+    const rows = keys.map((k) => `<tr><td>${L.names[k]}${L.hNames ? ' / ' + hn[k] : ''}</td><td>${Math.round(cs[k] * 10) / 10}</td><td>${Math.round(hs[k] * 10) / 10}</td></tr>`).join('');
+    const cd = c[L.d], hd = h[L.d];
+    const cDom = cd.dominant, hDom = hd.dominant;
+    let t = `<table class="tbl small"><thead><tr><th></th><th>Космограмма</th><th>Гороскоп</th></tr></thead><tbody>${rows}</tbody></table>`;
+    t += `<p><b>Космограмма (сущность):</b> ${cDom ? L.T[cDom].dom : 'выраженного преобладания нет — качества уравновешены.'} ${cs[cd.weakest] <= 2 ? L.T[cd.weakest].weak : ''}</p>`;
+    t += `<p><b>Гороскоп (реализация):</b> ${hDom ? L.T[hDom].domH : 'выраженного преобладания нет.'} ${hs[hd.weakest] <= 1 ? L.T[hd.weakest].weakH : ''}</p>`;
+    let verdict;
+    if (cDom && hDom && cDom === hDom) { verdict = 'Совпадение: внутренняя природа и внешняя реализация направлены в одну сторону — качество проявлено очень ярко и цельно.'; same++; }
+    else if (cDom && hDom) verdict = `Расхождение: по сути человек — «${L.names[cDom]}», а жизнь требует проявлять себя через «${hn[hDom]}». Это даёт внутреннее напряжение и задачу научиться выражать свою природу в непривычной форме.`;
+    else if (cDom) verdict = 'Сущность выражена ярко, а обстоятельства жизни дают ей разнообразные выходы — гибкость в реализации.';
+    else if (hDom) verdict = 'Внутренние качества уравновешены, а жизнь концентрирует события в одной сфере — обстоятельства сильнее характера.';
+    else verdict = 'И сущность, и реализация уравновешены: нет перекосов, но и нет ярко выраженной специализации.';
+    t += `<p class="note">${verdict}</p>`;
+    html += item(L.title, t);
+    txt.push(`${L.title}: космограмма — ${cDom ? L.names[cDom] : 'равновесие'}, гороскоп — ${hDom ? hn[hDom] : 'равновесие'}.`);
+  }
+  html += item('Итог сравнения', same >= 3 ? 'Космограмма и гороскоп в основном совпадают: характер и судьба согласованы, человек «на своём месте», задатки реализуются естественно.' : same >= 1 ? 'Совпадение частичное: часть качеств реализуется легко, другая требует перестройки под условия жизни.' : 'Космограмма и гороскоп различаются: врождённая программа и жизненные обстоятельства тянут в разные стороны — главная задача в том, чтобы найти форму выражения своей сущности в данных условиях.');
+  return { html, text: txt.join(' ') };
+}
+
+// ---- Планетарная лестница ----
+function ladderSection(chart, an) {
+  let html = '<p class="muted">Семь планет септенера выстраиваются по порядку от 0° Овна. Ступени связаны парами: 1-я и 7-я (талант и уязвимость), 2-я и 6-я (желания и жертва), 3-я и 5-я (судьба и свобода); 4-я — вершина и стержень.</p>';
+  const txt = ['ПЛАНЕТАРНАЯ ЛЕСТНИЦА:'];
+  for (const s of an.ladder) {
+    const p = chart.pos[s.id];
+    const dg = dignity(s.id, p.sign, chart.day);
+    const k = an.ks[s.id].total;
+    const quality = k >= 3 ? 'Планета сильна (кармический статус +' + k + '): ступень проходится с опорой на достоинство.' : k <= -2 ? 'Планета ослаблена (статус ' + k + '): задачи ступени даются тяжелее и требуют работы.' : 'Средний статус планеты (' + (k > 0 ? '+' : '') + k + ').';
+    html += item(`${ST.LADDER_STEP[s.step].name}: ${name(s.id)} (${fmtDeg(p.lon)}${dg.label ? ', ' + dg.label : ''}, ${roman[p.house]} дом)`,
+      `<p class="muted">${ST.LADDER_STEP[s.step].text}</p><p><b>${name(s.id)}:</b> ${ST.ladderPlanetText(s.id, s.step)}. Сфера проявления — ${roman[p.house]} дом: ${N.HOUSE_MEANING[p.house].theme}.</p><p class="note">${quality}</p>`);
+    txt.push(`${s.step}-я ступень: ${name(s.id)} (статус ${k})`);
+  }
+  const L = (n) => an.ladder[n - 1].id;
+  const pair = (a, b, title, textF) => item(title, textF(name(L(a)), name(L(b))));
+  html += pair(1, 7, 'Пара 1–7: талант и уязвимость', (x, y) => `Сила человека — ${x}, слабое место — ${y}. Опираясь на качества ${P[L(1)].gen}, легче преодолевать страхи ${P[L(7)].gen}.`);
+  html += pair(2, 6, 'Пара 2–6: желания и жертва', (x, y) => `Чем охотнее человек отдаёт по линии ${P[L(6)].gen} (${y}), тем полнее получает желаемое по линии ${P[L(2)].gen} (${x}).`);
+  html += pair(3, 5, 'Пара 3–5: судьба и свобода', (x, y) => `${x} показывает, где выбор предрешён и важно не ошибиться; ${y} — где свобода безгранична, но нет подстраховки.`);
+  const top = L(4), tk = an.ks[top].total;
+  html += item(`Вершина лестницы: ${name(top)}`, `${N.PLANET_MEANING[top].core} Именно её сферы — центр жизни. ${tk < 0 ? 'Стержневая планета ослаблена — её проработка является главной жизненной задачей.' : 'Стержневая планета в достоинстве — у жизни прочный центр.'}`);
+  txt.push(`Вершина: ${name(top)}.`);
+  return { html, text: txt.join(' ') };
 }
 
 function synthesis(chart, an) {
